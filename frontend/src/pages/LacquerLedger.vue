@@ -6,11 +6,14 @@ import LayerStack from '../components/common/LayerStack.vue';
 import EmptyPanel from '../components/common/EmptyPanel.vue';
 import { useLacquerStore } from '../stores/lacquerStore';
 import { useBoardStore } from '../stores/boardStore';
+import { useRevisionStore } from '../stores/revisionStore';
 import { averageThickness, curingInRange, formatDate, layersToTarget, TARGET_TOTAL_MM } from '../utils/layer';
 import { MIX_RATIOS, type LacquerLayer } from '../types/lacquer-layer';
 
 const lacquerStore = useLacquerStore();
 const boardStore = useBoardStore();
+const revisionStore = useRevisionStore();
+const readonly = computed(() => !revisionStore.isViewingDraft);
 
 const guqinOptions = computed(() => Array.from(new Set([...boardStore.guqinNos, ...lacquerStore.guqinNos])).sort());
 const selectedGuqin = ref(guqinOptions.value[0] ?? '');
@@ -19,6 +22,15 @@ watch(guqinOptions, (list) => {
     selectedGuqin.value = list[0];
   }
 });
+// 切到某份修订后，若选中琴号不在其中则回到该修订首张琴
+watch(
+  () => revisionStore.viewingId,
+  () => {
+    if (selectedGuqin.value && !guqinOptions.value.includes(selectedGuqin.value)) {
+      selectedGuqin.value = guqinOptions.value[0] ?? '';
+    }
+  },
+);
 
 const layers = computed(() => (selectedGuqin.value ? lacquerStore.layersOf(selectedGuqin.value) : []));
 const total = computed(() => (selectedGuqin.value ? lacquerStore.totalOf(selectedGuqin.value) : 0));
@@ -127,10 +139,22 @@ async function remove(layer: LacquerLayer) {
 <template>
   <div>
     <h2 class="page-title">灰胎髹漆遍次台账</h2>
-    <p class="page-desc">按遍次累加灰胎厚度，记录荫房温湿度与打磨目数；工艺窗口为 20~30℃ / 70~85%。</p>
+    <p class="page-desc">
+      按遍次累加灰胎厚度，记录荫房温湿度与打磨目数；工艺窗口为 20~30℃ / 70~85%。
+      累计厚度按当前修订 {{ revisionStore.viewing?.label }}（{{ revisionStore.isViewingDraft ? '工作台' : '封存只读' }}）统计。
+    </p>
+
+    <el-alert
+      v-if="readonly"
+      class="readonly-tip"
+      type="info"
+      show-icon
+      :closable="false"
+      :title="`正在查看封存修订 ${revisionStore.viewing?.label}，灰胎遍次为只读快照；继续施工请在顶栏封存并开新修订或切回工作台`"
+    />
 
     <div class="toolbar">
-      <el-button type="primary" @click="openAppend">追加髹漆遍次</el-button>
+      <el-button type="primary" :disabled="readonly" @click="openAppend">追加髹漆遍次</el-button>
       <el-select v-model="selectedGuqin" placeholder="选择琴号" style="width: 180px">
         <el-option v-for="no in guqinOptions" :key="no" :label="no" :value="no" />
       </el-select>
@@ -152,7 +176,7 @@ async function remove(layer: LacquerLayer) {
       </el-col>
     </el-row>
 
-    <EmptyPanel v-if="layers.length === 0" description="该琴暂无髹漆遍次记录" action-text="追加髹漆遍次" @action="openAppend" />
+    <EmptyPanel v-if="layers.length === 0" description="该琴在当前修订暂无髹漆遍次记录" :action-text="readonly ? '' : '追加髹漆遍次'" @action="openAppend" />
 
     <template v-else>
       <el-card shadow="never" class="block">
@@ -189,8 +213,8 @@ async function remove(layer: LacquerLayer) {
           <el-table-column prop="remark" label="备注" min-width="120" />
           <el-table-column label="操作" width="150" fixed="right">
             <template #default="scope">
-              <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
-              <el-button link type="danger" @click="remove(scope.row)">删除</el-button>
+              <el-button link type="primary" :disabled="readonly" @click="openEdit(scope.row)">编辑</el-button>
+              <el-button link type="danger" :disabled="readonly" @click="remove(scope.row)">删除</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -254,6 +278,9 @@ async function remove(layer: LacquerLayer) {
   align-items: center;
   margin-bottom: 12px;
   flex-wrap: wrap;
+}
+.readonly-tip {
+  margin-bottom: 12px;
 }
 .stat-row {
   margin-bottom: 12px;

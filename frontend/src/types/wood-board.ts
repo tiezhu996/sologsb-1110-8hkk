@@ -13,6 +13,8 @@ export type WoodDefect = '无' | '节疤' | '裂纹';
 /** 板材（面板 / 底板） */
 export interface WoodBoard {
   id: string;
+  /** 所属修订 id：工作台记录归属当前 draft，封存后随修订只读 */
+  revisionId: string;
   /** 板材号 */
   boardNo: string;
   /** 所属琴号：同一琴号下面板与底板配对绑定 */

@@ -4,6 +4,8 @@ export type PostPos = '天柱偏左' | '天柱中' | '天柱偏右' | '未定';
 /** 槽腹尺寸（掏膛） */
 export interface SoundChamber {
   id: string;
+  /** 所属修订 id：工作台记录归属当前 draft，封存后随修订只读 */
+  revisionId: string;
   /** 琴号 */
   guqinNo: string;
   /** 纳音处面板厚度（mm） */

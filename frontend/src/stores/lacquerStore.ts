@@ -3,6 +3,7 @@ import { db } from '../utils/db';
 import { uid } from '../utils/id';
 import { toPlain } from '../utils/plain';
 import { cumulativeThickness, nextSeq, sortLayers } from '../utils/layer';
+import { useRevisionStore } from './revisionStore';
 import type { LacquerLayer } from '../types/lacquer-layer';
 
 export interface LacquerInput {
@@ -27,19 +28,28 @@ export const useLacquerStore = defineStore('lacquer', {
   state: (): LacquerState => ({ layers: [], hydrated: false }),
 
   getters: {
-    layersOf(state) {
-      return (guqinNo: string): LacquerLayer[] => sortLayers(state.layers.filter((l) => l.guqinNo === guqinNo));
+    scopedLayers(state): LacquerLayer[] {
+      const revisionId = useRevisionStore().viewingId;
+      return state.layers.filter((l) => l.revisionId === revisionId);
+    },
+    layersOf() {
+      return (guqinNo: string): LacquerLayer[] =>
+        sortLayers(this.scopedLayers.filter((l: LacquerLayer) => l.guqinNo === guqinNo));
     },
     /** 该琴当前累计厚度（mm） */
-    totalOf(state) {
-      return (guqinNo: string): number => cumulativeThickness(state.layers.filter((l) => l.guqinNo === guqinNo));
+    totalOf() {
+      return (guqinNo: string): number =>
+        cumulativeThickness(this.scopedLayers.filter((l: LacquerLayer) => l.guqinNo === guqinNo));
     },
-    guqinNos(state): string[] {
-      return Array.from(new Set(state.layers.map((l) => l.guqinNo))).sort();
+    guqinNos(): string[] {
+      return Array.from(new Set(this.scopedLayers.map((l: LacquerLayer) => l.guqinNo))).sort();
     },
     /** 荫房温湿度超窗口的遍次数量 */
-    outOfRangeCount(state): number {
-      return state.layers.filter((l) => !(l.curingTemp >= 20 && l.curingTemp <= 30 && l.curingHumidity >= 70 && l.curingHumidity <= 85)).length;
+    outOfRangeCount(): number {
+      return this.scopedLayers.filter(
+        (l: LacquerLayer) =>
+          !(l.curingTemp >= 20 && l.curingTemp <= 30 && l.curingHumidity >= 70 && l.curingHumidity <= 85),
+      ).length;
     },
   },
 
@@ -49,11 +59,24 @@ export const useLacquerStore = defineStore('lacquer', {
       this.hydrated = true;
     },
 
+    _draftRevisionId(): string {
+      const revisionStore = useRevisionStore();
+      const draft = revisionStore.currentDraft;
+      if (!draft || revisionStore.viewingId !== draft.id) {
+        throw new Error('封存修订只读：继续施工请先在顶栏开新修订（封存当前工作台）');
+      }
+      return draft.id;
+    },
+
     /** 追加一遍：遍次自动 +1，并重算该琴累计厚度 */
     async appendLayer(input: LacquerInput): Promise<LacquerLayer> {
-      const siblings = this.layers.filter((l) => l.guqinNo === input.guqinNo);
+      const revisionId = this._draftRevisionId();
+      const siblings = this.layers.filter(
+        (l) => l.revisionId === revisionId && l.guqinNo === input.guqinNo,
+      );
       const layer: LacquerLayer = {
         id: uid('layer'),
+        revisionId,
         guqinNo: input.guqinNo.trim(),
         seq: nextSeq(siblings),
         mixRatio: input.mixRatio,
@@ -74,16 +97,20 @@ export const useLacquerStore = defineStore('lacquer', {
       for (const item of withTotals) {
         await db.lacquers.put(toPlain(item));
       }
-      const others = this.layers.filter((l) => l.guqinNo !== input.guqinNo);
+      const others = this.layers.filter((l) => l.revisionId !== revisionId || l.guqinNo !== input.guqinNo);
       this.layers = [...others, ...withTotals];
       return withTotals.find((item) => item.id === layer.id)!;
     },
 
     async updateLayer(id: string, patch: Partial<LacquerInput>) {
+      this._draftRevisionId();
       const current = this.layers.find((l) => l.id === id);
-      if (!current) return;
+      if (!current || current.revisionId !== useRevisionStore().viewingId) return;
+      const revisionId = current.revisionId;
       const next: LacquerLayer = { ...current, ...patch };
-      const siblings = this.layers.filter((l) => l.guqinNo === next.guqinNo).map((l) => (l.id === id ? next : l));
+      const siblings = this.layers
+        .filter((l) => l.revisionId === revisionId && l.guqinNo === next.guqinNo)
+        .map((l) => (l.id === id ? next : l));
       const withTotals = siblings.map((item) => ({ ...item, totalThickness: cumulativeThickness(siblings, item.seq) }));
       for (const item of withTotals) {
         await db.lacquers.put(toPlain(item));
@@ -92,14 +119,12 @@ export const useLacquerStore = defineStore('lacquer', {
     },
 
     async removeLayer(id: string) {
+      this._draftRevisionId();
       const current = this.layers.find((l) => l.id === id);
+      if (!current || current.revisionId !== useRevisionStore().viewingId) return;
       await db.lacquers.delete(id);
       const rest = this.layers.filter((l) => l.id !== id);
-      if (!current) {
-        this.layers = rest;
-        return;
-      }
-      const siblings = rest.filter((l) => l.guqinNo === current.guqinNo);
+      const siblings = rest.filter((l) => l.revisionId === current.revisionId && l.guqinNo === current.guqinNo);
       const withTotals = siblings.map((item) => ({ ...item, totalThickness: cumulativeThickness(siblings, item.seq) }));
       for (const item of withTotals) {
         await db.lacquers.put(toPlain(item));

@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { db } from '../utils/db';
 import { uid } from '../utils/id';
 import { toPlain } from '../utils/plain';
+import { useRevisionStore } from './revisionStore';
 import type { PostPos, SoundChamber, ThicknessMark } from '../types/sound-chamber';
 
 export interface ChamberInput {
@@ -27,13 +28,18 @@ export const useChamberStore = defineStore('chamber', {
   state: (): ChamberState => ({ chambers: [], hydrated: false }),
 
   getters: {
-    byGuqin(state) {
-      return (guqinNo: string): SoundChamber | undefined => state.chambers.find((c) => c.guqinNo === guqinNo);
+    scopedChambers(state): SoundChamber[] {
+      const revisionId = useRevisionStore().viewingId;
+      return state.chambers.filter((c) => c.revisionId === revisionId);
+    },
+    byGuqin() {
+      return (guqinNo: string): SoundChamber | undefined =>
+        this.scopedChambers.find((c: SoundChamber) => c.guqinNo === guqinNo);
     },
     /** 三处厚度标注点，供 DimensionChart 绘制剖面标注 */
-    marksOf(state) {
+    marksOf() {
       return (guqinNo: string): ThicknessMark[] => {
-        const chamber = state.chambers.find((c) => c.guqinNo === guqinNo);
+        const chamber = this.scopedChambers.find((c: SoundChamber) => c.guqinNo === guqinNo);
         if (!chamber) return [];
         return [
           { key: 'nayinThickness', label: '纳音', value: chamber.nayinThickness },
@@ -43,18 +49,18 @@ export const useChamberStore = defineStore('chamber', {
       };
     },
     /** 三处厚度极差（mm），差值过大说明掏膛不均 */
-    thicknessSpread(state) {
+    thicknessSpread() {
       return (guqinNo: string): number => {
-        const chamber = state.chambers.find((c) => c.guqinNo === guqinNo);
+        const chamber = this.scopedChambers.find((c: SoundChamber) => c.guqinNo === guqinNo);
         if (!chamber) return 0;
         const list = [chamber.nayinThickness, chamber.longchiThickness, chamber.fengzhaoThickness];
         return Number((Math.max(...list) - Math.min(...list)).toFixed(1));
       };
     },
     /** 深径比：槽腹深度 / 面板平均厚度 */
-    depthRatio(state) {
+    depthRatio() {
       return (guqinNo: string): number => {
-        const chamber = state.chambers.find((c) => c.guqinNo === guqinNo);
+        const chamber = this.scopedChambers.find((c: SoundChamber) => c.guqinNo === guqinNo);
         if (!chamber) return 0;
         const avg = (chamber.nayinThickness + chamber.longchiThickness + chamber.fengzhaoThickness) / 3;
         return avg > 0 ? Number((chamber.chamberDepth / avg).toFixed(2)) : 0;
@@ -68,11 +74,23 @@ export const useChamberStore = defineStore('chamber', {
       this.hydrated = true;
     },
 
+    _draftRevisionId(): string {
+      const revisionStore = useRevisionStore();
+      const draft = revisionStore.currentDraft;
+      if (!draft || revisionStore.viewingId !== draft.id) {
+        throw new Error('封存修订只读：继续施工请先在顶栏开新修订（封存当前工作台）');
+      }
+      return draft.id;
+    },
+
     /** 每张琴一份槽腹记录：存在则更新，不存在则新增 */
     async saveChamber(input: ChamberInput): Promise<SoundChamber> {
-      const existed = this.chambers.find((c) => c.guqinNo === input.guqinNo);
+      const revisionId = this._draftRevisionId();
+      const siblings = this.chambers.filter((c) => c.revisionId === revisionId);
+      const existed = siblings.find((c) => c.guqinNo === input.guqinNo);
       const chamber: SoundChamber = {
         id: existed?.id ?? uid('chamber'),
+        revisionId,
         guqinNo: input.guqinNo.trim(),
         nayinThickness: Number(input.nayinThickness) || 0,
         longchiThickness: Number(input.longchiThickness) || 0,
@@ -92,6 +110,9 @@ export const useChamberStore = defineStore('chamber', {
     },
 
     async removeChamber(id: string) {
+      this._draftRevisionId();
+      const current = this.chambers.find((c) => c.id === id);
+      if (!current || current.revisionId !== useRevisionStore().viewingId) return;
       await db.chambers.delete(id);
       this.chambers = this.chambers.filter((c) => c.id !== id);
     },

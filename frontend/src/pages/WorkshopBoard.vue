@@ -9,6 +9,7 @@ import { useBoardStore } from '../stores/boardStore';
 import { useChamberStore } from '../stores/chamberStore';
 import { useLacquerStore } from '../stores/lacquerStore';
 import { useStringingStore } from '../stores/stringingStore';
+import { useRevisionStore } from '../stores/revisionStore';
 import { formatDate } from '../utils/layer';
 import { WOOD_SPECIES } from '../types/wood-board';
 import type { TimelineEvent } from '../types/ui';
@@ -18,6 +19,7 @@ const boardStore = useBoardStore();
 const chamberStore = useChamberStore();
 const lacquerStore = useLacquerStore();
 const stringingStore = useStringingStore();
+const revisionStore = useRevisionStore();
 const { progressList, summary } = useStageProgress();
 
 const stageParam = computed(() => (typeof route.query.stage === 'string' ? route.query.stage : ''));
@@ -46,7 +48,7 @@ const pendingString = computed(() => progressList.value.filter((item) => !item.s
 
 const events = computed<TimelineEvent[]>(() => {
   const list: TimelineEvent[] = [];
-  chamberStore.chambers.forEach((chamber) => {
+  chamberStore.scopedChambers.forEach((chamber) => {
     list.push({
       label: `掏膛完成 · ${chamber.guqinNo}`,
       at: formatDate(chamber.carvedAt),
@@ -54,7 +56,7 @@ const events = computed<TimelineEvent[]>(() => {
       type: 'primary',
     });
   });
-  lacquerStore.layers.forEach((layer) => {
+  lacquerStore.scopedLayers.forEach((layer) => {
     list.push({
       label: `髹漆第 ${layer.seq} 遍 · ${layer.guqinNo}`,
       at: formatDate(layer.appliedAt),
@@ -62,7 +64,7 @@ const events = computed<TimelineEvent[]>(() => {
       type: 'warning',
     });
   });
-  stringingStore.stringings.forEach((stringing) => {
+  stringingStore.scopedStringings.forEach((stringing) => {
     list.push({
       label: `上弦 · ${stringing.guqinNo}`,
       at: formatDate(stringing.strungAt),
@@ -78,8 +80,12 @@ const events = computed<TimelineEvent[]>(() => {
   <div>
     <h2 class="page-title">琴坯进度</h2>
     <p class="page-desc">
-      按选材 / 掏膛 / 灰胎 / 上弦四阶段统计在制琴坯；音色只用文字评语记录，不做音频文件与波形处理。数据保存在浏览器
-      IndexedDB（gbguqin-db）。
+      按选材 / 掏膛 / 灰胎 / 上弦四阶段统计在制琴坯；音色只用文字评语记录，不做音频文件与波形处理。
+      当前进度基于修订
+      <el-tag :type="revisionStore.isViewingDraft ? 'warning' : 'info'" size="small" effect="plain">
+        {{ revisionStore.viewing?.label }} · {{ revisionStore.isViewingDraft ? '工作台' : '封存只读' }}
+      </el-tag>
+      ；历史修订可在顶栏切换查看。
     </p>
 
     <el-row :gutter="12" class="stat-row">
@@ -101,7 +107,7 @@ const events = computed<TimelineEvent[]>(() => {
       <template #header>
         <div class="card-head">
           <span>阶段统计（已完成琴坯数）</span>
-          <span class="card-note">板材 {{ boardStore.boards.length }} 块（可用 {{ boardStore.usableCount }} 块）· 髹漆 {{ lacquerStore.layers.length }} 遍 · 荫房异常 {{ lacquerStore.outOfRangeCount }} 遍</span>
+          <span class="card-note">当前修订 {{ revisionStore.viewing?.label }}：板材 {{ boardStore.scopedBoards.length }} 块（可用 {{ boardStore.usableCount }} 块）· 髹漆 {{ lacquerStore.scopedLayers.length }} 遍 · 荫房异常 {{ lacquerStore.outOfRangeCount }} 遍</span>
         </div>
       </template>
       <el-row :gutter="12">

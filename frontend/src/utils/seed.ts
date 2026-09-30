@@ -4,12 +4,24 @@ import type { SoundChamber } from '../types/sound-chamber';
 import type { LacquerLayer } from '../types/lacquer-layer';
 import type { Stringing } from '../types/stringing';
 import { cumulativeThickness } from './layer';
+import { createRevision, FIRST_REVISION_ID } from './revision';
+
+/** 示例数据尚未落库时的形态：revisionId 由播种流程统一盖到初版修订上 */
+type DraftBoard = Omit<WoodBoard, 'revisionId'>;
+type DraftChamber = Omit<SoundChamber, 'revisionId'>;
+type DraftLayer = Omit<LacquerLayer, 'revisionId'>;
+type DraftStringing = Omit<Stringing, 'revisionId'>;
 
 const DAY = 86_400_000;
 const daysAgo = (n: number) => new Date(Date.now() - n * DAY).toISOString();
 
+/** 给一批记录盖上修订归属 */
+function stamp<T extends object>(rows: T[], revisionId: string): Array<T & { revisionId: string }> {
+  return rows.map((row) => ({ ...row, revisionId }));
+}
+
 /** 示例琴坯：5 张琴、10 块板材 */
-export const SEED_BOARDS: WoodBoard[] = [
+export const SEED_BOARDS: DraftBoard[] = [
   { id: 'board-001', boardNo: 'MB-2501', guqinNo: 'Q-2501', part: '面板', species: '桐木', dryYears: 8, thicknessMm: 32, grain: '直纹', defect: '无', receivedAt: daysAgo(120), remark: '河南兰考桐' },
   { id: 'board-002', boardNo: 'MB-2502', guqinNo: 'Q-2501', part: '底板', species: '梓木', dryYears: 6, thicknessMm: 18, grain: '直纹', defect: '无', receivedAt: daysAgo(118) },
   { id: 'board-003', boardNo: 'MB-2503', guqinNo: 'Q-2502', part: '面板', species: '杉木', dryYears: 12, thicknessMm: 30, grain: '水波纹', defect: '无', receivedAt: daysAgo(110), remark: '川杉，纹路佳' },
@@ -22,14 +34,14 @@ export const SEED_BOARDS: WoodBoard[] = [
   { id: 'board-010', boardNo: 'MB-2510', guqinNo: 'Q-2505', part: '底板', species: '梓木', dryYears: 4, thicknessMm: 17, grain: '直纹', defect: '无', receivedAt: daysAgo(28) },
 ];
 
-export const SEED_CHAMBERS: SoundChamber[] = [
+export const SEED_CHAMBERS: DraftChamber[] = [
   { id: 'chamber-001', guqinNo: 'Q-2501', nayinThickness: 16, longchiThickness: 14, fengzhaoThickness: 15, chamberDepth: 26, postPos: '天柱中', poolSize: '200×22', carvedAt: daysAgo(88), carver: '周砚秋', remark: '纳音略厚，出音偏沉' },
   { id: 'chamber-002', guqinNo: 'Q-2502', nayinThickness: 14, longchiThickness: 12, fengzhaoThickness: 13, chamberDepth: 28, postPos: '天柱偏左', poolSize: '210×24', carvedAt: daysAgo(76), carver: '周砚秋' },
   { id: 'chamber-003', guqinNo: 'Q-2503', nayinThickness: 15, longchiThickness: 13, fengzhaoThickness: 14, chamberDepth: 25, postPos: '天柱偏右', poolSize: '195×21', carvedAt: daysAgo(60), carver: '林听雪' },
   { id: 'chamber-004', guqinNo: 'Q-2504', nayinThickness: 17, longchiThickness: 15, fengzhaoThickness: 16, chamberDepth: 24, postPos: '天柱中', poolSize: '215×25', carvedAt: daysAgo(44), carver: '林听雪', remark: '老料槽腹留厚' },
 ];
 
-function buildSeedLayers(): LacquerLayer[] {
+function buildSeedLayers(): DraftLayer[] {
   const plan: Array<[string, string, number, number, number, number, number, string]> = [
     // guqinNo, mixRatio, temp, humidity, grit, thicknessMm, daysAgo, operator
     ['Q-2501', '1:1', 24, 78, 240, 0.12, 70, '林听雪'],
@@ -67,8 +79,8 @@ function buildSeedLayers(): LacquerLayer[] {
 }
 
 /** 重新计算每张琴的累计厚度（写入本地库前的派生值） */
-export function withCumulative(layers: LacquerLayer[]): LacquerLayer[] {
-  const byGuqin = new Map<string, LacquerLayer[]>();
+export function withCumulative(layers: DraftLayer[]): DraftLayer[] {
+  const byGuqin = new Map<string, DraftLayer[]>();
   layers.forEach((layer) => {
     const list = byGuqin.get(layer.guqinNo) ?? [];
     list.push(layer);
@@ -80,7 +92,7 @@ export function withCumulative(layers: LacquerLayer[]): LacquerLayer[] {
   }));
 }
 
-export const SEED_STRINGINGS: Stringing[] = [
+export const SEED_STRINGINGS: DraftStringing[] = [
   {
     id: 'stringing-001',
     guqinNo: 'Q-2501',
@@ -130,11 +142,15 @@ export const SEED_STRINGINGS: Stringing[] = [
   },
 ];
 
-/** 首次打开（表内无数据）时写入示例数据；已有数据则不动 */
-export async function seedIfEmpty(): Promise<void> {
-  const flag = await db.meta.get('seeded');
-  if (flag) {
-    return;
+/**
+ * 首次打开（库内无修订）时写入示例数据；已有数据则不动。
+ * 初版修订 R001 与四类示例记录在同一笔事务内落库：要么整套示例库写好，
+ * 要么什么都不写，不会出现半套新库。
+ */
+export async function seedIfEmpty(): Promise<string | undefined> {
+  const revisionCount = await db.revisions.count();
+  if (revisionCount > 0) {
+    return undefined;
   }
   const [boardCount, chamberCount, lacquerCount, stringingCount] = await Promise.all([
     db.boards.count(),
@@ -142,13 +158,20 @@ export async function seedIfEmpty(): Promise<void> {
     db.lacquers.count(),
     db.stringings.count(),
   ]);
-  const layers = withCumulative(buildSeedLayers());
+  const firstRevision = createRevision(1);
+  const layers = stamp(withCumulative(buildSeedLayers()), firstRevision.id);
 
-  await db.transaction('rw', db.boards, db.chambers, db.lacquers, db.stringings, db.meta, async () => {
-    if (boardCount === 0) await db.boards.bulkPut(SEED_BOARDS);
-    if (chamberCount === 0) await db.chambers.bulkPut(SEED_CHAMBERS);
+  await db.transaction(
+    'rw',
+    [db.boards, db.chambers, db.lacquers, db.stringings, db.revisions, db.meta],
+    async () => {
+    if (boardCount === 0) await db.boards.bulkPut(stamp(SEED_BOARDS, firstRevision.id));
+    if (chamberCount === 0) await db.chambers.bulkPut(stamp(SEED_CHAMBERS, firstRevision.id));
     if (lacquerCount === 0) await db.lacquers.bulkPut(layers);
-    if (stringingCount === 0) await db.stringings.bulkPut(SEED_STRINGINGS);
+    if (stringingCount === 0) await db.stringings.bulkPut(stamp(SEED_STRINGINGS, firstRevision.id));
+    await db.revisions.put(firstRevision);
     await db.meta.put({ key: 'seeded', value: new Date().toISOString() });
   });
+
+  return FIRST_REVISION_ID;
 }

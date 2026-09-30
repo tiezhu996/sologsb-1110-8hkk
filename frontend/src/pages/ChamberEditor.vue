@@ -1,20 +1,33 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus';
 import DimensionChart from '../components/common/DimensionChart.vue';
 import EmptyPanel from '../components/common/EmptyPanel.vue';
 import { useBoardStore } from '../stores/boardStore';
 import { useChamberStore } from '../stores/chamberStore';
+import { useRevisionStore } from '../stores/revisionStore';
 import { formatDate } from '../utils/layer';
 import { POST_POSITIONS, type PostPos, type SoundChamber } from '../types/sound-chamber';
 
 const boardStore = useBoardStore();
 const chamberStore = useChamberStore();
+const revisionStore = useRevisionStore();
+const readonly = computed(() => !revisionStore.isViewingDraft);
 
 const dialogVisible = ref(false);
 const editingId = ref('');
 const formRef = ref<FormInstance>();
-const selectedGuqin = ref(chamberStore.chambers[0]?.guqinNo ?? '');
+const selectedGuqin = ref(chamberStore.scopedChambers[0]?.guqinNo ?? '');
+
+// 切换修订后，若当前选中的琴号不在该修订中，回到该修订第一条记录
+watch(
+  () => revisionStore.viewingId,
+  () => {
+    if (!chamberStore.byGuqin(selectedGuqin.value)) {
+      selectedGuqin.value = chamberStore.scopedChambers[0]?.guqinNo ?? '';
+    }
+  },
+);
 
 interface ChamberForm {
   guqinNo: string;
@@ -121,15 +134,24 @@ async function remove(chamber: SoundChamber) {
     <h2 class="page-title">槽腹尺寸记录</h2>
     <p class="page-desc">录入纳音 / 龙池 / 凤沼三处面板厚度即绘制槽腹剖面标注，并给出厚度极差与深径比。</p>
 
+    <el-alert
+      v-if="readonly"
+      class="readonly-tip"
+      type="info"
+      show-icon
+      :closable="false"
+      :title="`正在查看封存修订 ${revisionStore.viewing?.label}，槽腹记录为只读快照；继续施工请在顶栏封存并开新修订或切回工作台`"
+    />
+
     <div class="toolbar">
-      <el-button type="primary" @click="openCreate">新增槽腹记录</el-button>
+      <el-button type="primary" :disabled="readonly" @click="openCreate">新增槽腹记录</el-button>
       <el-select v-model="selectedGuqin" clearable placeholder="选择琴号查看剖面" style="width: 200px">
-        <el-option v-for="chamber in chamberStore.chambers" :key="chamber.id" :label="`${chamber.guqinNo} · 深 ${chamber.chamberDepth}mm`" :value="chamber.guqinNo" />
+        <el-option v-for="chamber in chamberStore.scopedChambers" :key="chamber.id" :label="`${chamber.guqinNo} · 深 ${chamber.chamberDepth}mm`" :value="chamber.guqinNo" />
       </el-select>
       <el-tag v-if="selectedGuqin" type="info" effect="plain">三处厚度极差 {{ spread }} mm · 深径比 {{ depthRatio }}</el-tag>
     </div>
 
-    <EmptyPanel v-if="chamberStore.chambers.length === 0" description="暂无槽腹记录" action-text="新增槽腹记录" @action="openCreate" />
+    <EmptyPanel v-if="chamberStore.scopedChambers.length === 0" description="该修订暂无槽腹记录" :action-text="readonly ? '' : '新增槽腹记录'" @action="openCreate" />
 
     <template v-else>
       <el-card shadow="never" class="block">
@@ -140,7 +162,7 @@ async function remove(chamber: SoundChamber) {
 
       <el-card shadow="never" class="block">
         <template #header>槽腹台账</template>
-        <el-table :data="chamberStore.chambers" size="small" border>
+        <el-table :data="chamberStore.scopedChambers" size="small" border>
           <el-table-column prop="guqinNo" label="琴号" width="100" />
           <el-table-column prop="nayinThickness" label="纳音(mm)" width="100" />
           <el-table-column prop="longchiThickness" label="龙池(mm)" width="100" />
@@ -155,8 +177,8 @@ async function remove(chamber: SoundChamber) {
           <el-table-column prop="remark" label="备注" min-width="140" />
           <el-table-column label="操作" width="150" fixed="right">
             <template #default="scope">
-              <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
-              <el-button link type="danger" @click="remove(scope.row)">删除</el-button>
+              <el-button link type="primary" :disabled="readonly" @click="openEdit(scope.row)">编辑</el-button>
+              <el-button link type="danger" :disabled="readonly" @click="remove(scope.row)">删除</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -223,6 +245,9 @@ async function remove(chamber: SoundChamber) {
   align-items: center;
   margin-bottom: 12px;
   flex-wrap: wrap;
+}
+.readonly-tip {
+  margin-bottom: 12px;
 }
 .block {
   margin-bottom: 16px;

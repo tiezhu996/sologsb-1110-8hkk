@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { db } from '../utils/db';
 import { uid } from '../utils/id';
 import { toPlain } from '../utils/plain';
+import { useRevisionStore } from './revisionStore';
 import type { StringDefect, StringType, Stringing, ToneVersion } from '../types/stringing';
 
 export interface StringingInput {
@@ -30,15 +31,20 @@ export const useStringingStore = defineStore('stringing', {
   state: (): StringingState => ({ stringings: [], hydrated: false }),
 
   getters: {
-    byGuqin(state) {
-      return (guqinNo: string): Stringing | undefined => state.stringings.find((s) => s.guqinNo === guqinNo);
+    scopedStringings(state): Stringing[] {
+      const revisionId = useRevisionStore().viewingId;
+      return state.stringings.filter((s) => s.revisionId === revisionId);
+    },
+    byGuqin() {
+      return (guqinNo: string): Stringing | undefined =>
+        this.scopedStringings.find((s: Stringing) => s.guqinNo === guqinNo);
     },
     /** 三段评语 + 九德的文字检索 */
-    search(state) {
+    search() {
       return (keyword: string): Stringing[] => {
         const kw = keyword.trim().toLowerCase();
-        if (!kw) return state.stringings;
-        return state.stringings.filter((s) =>
+        if (!kw) return this.scopedStringings;
+        return this.scopedStringings.filter((s: Stringing) =>
           [s.guqinNo, s.sanNote, s.anNote, s.fanNote, s.nineVirtues, s.operator, s.defects.join(' ')]
             .join(' ')
             .toLowerCase()
@@ -46,8 +52,8 @@ export const useStringingStore = defineStore('stringing', {
         );
       };
     },
-    defectCount(state): number {
-      return state.stringings.filter((s) => s.defects.some((d) => d !== '无')).length;
+    defectCount(): number {
+      return this.scopedStringings.filter((s: Stringing) => s.defects.some((d) => d !== '无')).length;
     },
   },
 
@@ -57,9 +63,20 @@ export const useStringingStore = defineStore('stringing', {
       this.hydrated = true;
     },
 
+    _draftRevisionId(): string {
+      const revisionStore = useRevisionStore();
+      const draft = revisionStore.currentDraft;
+      if (!draft || revisionStore.viewingId !== draft.id) {
+        throw new Error('封存修订只读：继续施工请先在顶栏开新修订（封存当前工作台）');
+      }
+      return draft.id;
+    },
+
     async addStringing(input: StringingInput): Promise<Stringing> {
+      const revisionId = this._draftRevisionId();
       const stringing: Stringing = {
         id: uid('stringing'),
+        revisionId,
         guqinNo: input.guqinNo.trim(),
         stringType: input.stringType,
         nut: input.nut.trim(),
@@ -80,8 +97,9 @@ export const useStringingStore = defineStore('stringing', {
 
     /** 保存评语：如内容有变化且 keepVersion，则把改动前的评语存入历史版本 */
     async updateStringing(id: string, patch: Partial<StringingInput>) {
+      this._draftRevisionId();
       const current = this.stringings.find((s) => s.id === id);
-      if (!current) return;
+      if (!current || current.revisionId !== useRevisionStore().viewingId) return;
       const notesChanged =
         (patch.sanNote !== undefined && patch.sanNote.trim() !== current.sanNote) ||
         (patch.anNote !== undefined && patch.anNote.trim() !== current.anNote) ||
@@ -121,6 +139,9 @@ export const useStringingStore = defineStore('stringing', {
     },
 
     async removeStringing(id: string) {
+      this._draftRevisionId();
+      const current = this.stringings.find((s) => s.id === id);
+      if (!current || current.revisionId !== useRevisionStore().viewingId) return;
       await db.stringings.delete(id);
       this.stringings = this.stringings.filter((s) => s.id !== id);
     },

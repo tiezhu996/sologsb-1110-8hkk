@@ -7,10 +7,14 @@ export function sortLayers(layers: LacquerLayer[]): LacquerLayer[] {
   return [...layers].sort((a, b) => a.seq - b.seq);
 }
 
-/** 累计厚度：本遍及之前各遍厚度累加 */
-export function cumulativeThickness(layers: LacquerLayer[], uptoSeq?: number): number {
+/** 累计厚度：本遍及之前各遍厚度累加（只依赖遍次号与单遍厚度，接受结构子集） */
+export function cumulativeThickness<T extends { seq: number; layerThickness: number }>(
+  layers: T[],
+  uptoSeq?: number,
+): number {
   const limit = uptoSeq ?? Number.POSITIVE_INFINITY;
-  const sum = sortLayers(layers)
+  const sum = [...layers]
+    .sort((a, b) => a.seq - b.seq)
     .filter((layer) => layer.seq <= limit)
     .reduce((acc, layer) => acc + (Number(layer.layerThickness) || 0), 0);
   return Number(sum.toFixed(3));

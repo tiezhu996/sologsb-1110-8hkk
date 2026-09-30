@@ -6,6 +6,7 @@ import EmptyPanel from '../components/common/EmptyPanel.vue';
 import DimensionChart from '../components/common/DimensionChart.vue';
 import { useBoardStore } from '../stores/boardStore';
 import { useChamberStore } from '../stores/chamberStore';
+import { useRevisionStore } from '../stores/revisionStore';
 import { useGuqinFilter } from '../hooks/useGuqinFilter';
 import { thicknessGap } from '../utils/wood';
 import { formatDate } from '../utils/layer';
@@ -23,7 +24,9 @@ import {
 
 const boardStore = useBoardStore();
 const chamberStore = useChamberStore();
+const revisionStore = useRevisionStore();
 const filter = useGuqinFilter();
+const readonly = computed(() => !revisionStore.isViewingDraft);
 
 const dialogVisible = ref(false);
 const editingId = ref('');
@@ -61,7 +64,7 @@ const rules: FormRules = {
   guqinNo: [{ required: true, message: '请输入琴号', trigger: 'blur' }],
 };
 
-const visible = computed(() => filter.applyBoards(boardStore.boards));
+const visible = computed(() => filter.applyBoards(boardStore.scopedBoards));
 const visiblePairs = computed(() => {
   const nos = new Set(visible.value.map((b) => b.guqinNo));
   return boardStore.pairs.filter((pair) => nos.has(pair.guqinNo));
@@ -144,8 +147,17 @@ async function remove(board: WoodBoard) {
     <h2 class="page-title">板材登记与配对</h2>
     <p class="page-desc">同一琴号下面板与底板配对绑定，并按阴干年限回显含水率；三处厚度标注由槽腹记录派生。</p>
 
+    <el-alert
+      v-if="readonly"
+      class="readonly-tip"
+      type="info"
+      show-icon
+      :closable="false"
+      :title="`正在查看封存修订 ${revisionStore.viewing?.label}，板材为只读快照；继续施工请在顶栏封存并开新修订或切回工作台`"
+    />
+
     <div class="toolbar">
-      <el-button type="primary" @click="openCreate">登记板材</el-button>
+      <el-button type="primary" :disabled="readonly" @click="openCreate">登记板材</el-button>
       <el-button @click="selectedGuqin = boardStore.guqinNos[0] ?? ''">查看首张琴剖面</el-button>
     </div>
 
@@ -155,7 +167,7 @@ async function remove(board: WoodBoard) {
         { key: 'species', label: '树种', options: WOOD_SPECIES, width: 110 },
       ]"
       :result-count="visible.length"
-      :total-count="boardStore.boards.length"
+      :total-count="boardStore.scopedBoards.length"
     />
 
     <EmptyPanel
@@ -218,8 +230,8 @@ async function remove(board: WoodBoard) {
           <el-table-column prop="remark" label="备注" min-width="120" />
           <el-table-column label="操作" width="150" fixed="right">
             <template #default="scope">
-              <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
-              <el-button link type="danger" @click="remove(scope.row)">删除</el-button>
+              <el-button link type="primary" :disabled="readonly" @click="openEdit(scope.row)">编辑</el-button>
+              <el-button link type="danger" :disabled="readonly" @click="remove(scope.row)">删除</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -300,6 +312,9 @@ async function remove(board: WoodBoard) {
   font-size: 13px;
 }
 .toolbar {
+  margin-bottom: 12px;
+}
+.readonly-tip {
   margin-bottom: 12px;
 }
 .block {

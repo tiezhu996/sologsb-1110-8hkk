@@ -17,6 +17,8 @@ export interface ToneVersion {
 /** 上弦与音色文字评价 */
 export interface Stringing {
   id: string;
+  /** 所属修订 id：工作台记录归属当前 draft，封存后随修订只读 */
+  revisionId: string;
   /** 琴号 */
   guqinNo: string;
   /** 弦材质 */

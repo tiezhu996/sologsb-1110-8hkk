@@ -7,6 +7,7 @@ import EmptyPanel from '../components/common/EmptyPanel.vue';
 import ToneTextEditor from '../components/common/ToneTextEditor.vue';
 import { useStringingStore } from '../stores/stringingStore';
 import { useBoardStore } from '../stores/boardStore';
+import { useRevisionStore } from '../stores/revisionStore';
 import { formatDate } from '../utils/layer';
 import {
   NINE_VIRTUES,
@@ -21,6 +22,8 @@ import {
 const route = useRoute();
 const stringingStore = useStringingStore();
 const boardStore = useBoardStore();
+const revisionStore = useRevisionStore();
+const readonly = computed(() => !revisionStore.isViewingDraft);
 
 const dialogVisible = ref(false);
 const editingId = ref('');
@@ -65,7 +68,7 @@ const visible = computed(() =>
   }),
 );
 
-const editingVersions = computed(() => (editingId.value ? stringingStore.stringings.find((s) => s.id === editingId.value)?.noteVersions ?? [] : []));
+const editingVersions = computed(() => (editingId.value ? stringingStore.scopedStringings.find((s) => s.id === editingId.value)?.noteVersions ?? [] : []));
 
 function openCreate() {
   editingId.value = '';
@@ -149,8 +152,17 @@ async function remove(stringing: Stringing) {
     <h2 class="page-title">上弦记录与音色文字评价</h2>
     <p class="page-desc">散音 / 按音 / 泛音三段评语均为纯文本，保存后可检索关键字并对照历史版本；不做音频文件与波形处理。</p>
 
+    <el-alert
+      v-if="readonly"
+      class="readonly-tip"
+      type="info"
+      show-icon
+      :closable="false"
+      :title="`正在查看封存修订 ${revisionStore.viewing?.label}，上弦记录与评语为只读快照；继续施工请在顶栏封存并开新修订或切回工作台`"
+    />
+
     <div class="toolbar">
-      <el-button type="primary" @click="openCreate">登记上弦记录</el-button>
+      <el-button type="primary" :disabled="readonly" @click="openCreate">登记上弦记录</el-button>
       <el-tag type="info" effect="plain">九德：{{ NINE_VIRTUES.join(' · ') }}</el-tag>
       <el-tag v-if="stringingStore.defectCount" type="warning" effect="plain">有缺陷记录 {{ stringingStore.defectCount }} 条</el-tag>
     </div>
@@ -162,10 +174,10 @@ async function remove(stringing: Stringing) {
       ]"
       keyword-placeholder="检索散音 / 按音 / 泛音 / 九德文字"
       :result-count="visible.length"
-      :total-count="stringingStore.stringings.length"
+      :total-count="stringingStore.scopedStringings.length"
     />
 
-    <EmptyPanel v-if="visible.length === 0" description="没有符合条件的上弦记录" action-text="登记上弦记录" @action="openCreate" />
+    <EmptyPanel v-if="visible.length === 0" description="没有符合条件的上弦记录" :action-text="readonly ? '' : '登记上弦记录'" @action="openCreate" />
 
     <el-card v-else shadow="never" class="block">
       <el-table :data="visible" size="small" border>
@@ -201,8 +213,8 @@ async function remove(stringing: Stringing) {
         </el-table-column>
         <el-table-column label="操作" width="150" fixed="right">
           <template #default="scope">
-            <el-button link type="primary" @click="openEdit(scope.row)">编辑评语</el-button>
-            <el-button link type="danger" @click="remove(scope.row)">删除</el-button>
+            <el-button link type="primary" :disabled="readonly" @click="openEdit(scope.row)">编辑评语</el-button>
+            <el-button link type="danger" :disabled="readonly" @click="remove(scope.row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -264,6 +276,9 @@ async function remove(stringing: Stringing) {
   align-items: center;
   margin-bottom: 12px;
   flex-wrap: wrap;
+}
+.readonly-tip {
+  margin-bottom: 12px;
 }
 .block {
   border-radius: 8px;

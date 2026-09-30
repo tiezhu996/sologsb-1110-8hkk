@@ -47,22 +47,22 @@ export function useStageProgress() {
 
   const guqinNos = computed(() => {
     const set = new Set<string>();
-    boardStore.boards.forEach((b) => set.add(b.guqinNo));
-    chamberStore.chambers.forEach((c) => set.add(c.guqinNo));
-    lacquerStore.layers.forEach((l) => set.add(l.guqinNo));
-    stringingStore.stringings.forEach((s) => set.add(s.guqinNo));
+    boardStore.scopedBoards.forEach((b) => set.add(b.guqinNo));
+    chamberStore.scopedChambers.forEach((c) => set.add(c.guqinNo));
+    lacquerStore.scopedLayers.forEach((l) => set.add(l.guqinNo));
+    stringingStore.scopedStringings.forEach((s) => set.add(s.guqinNo));
     return Array.from(set).sort();
   });
 
   const progressList = computed<StageProgress[]>(() =>
     guqinNos.value.map((guqinNo) => {
-      const boards = boardStore.boards.filter((b) => b.guqinNo === guqinNo);
+      const boards = boardStore.scopedBoards.filter((b) => b.guqinNo === guqinNo);
       const panel = boards.find((b) => b.part === '面板');
       const base = boards.find((b) => b.part === '底板');
-      const chamber = chamberStore.chambers.find((c) => c.guqinNo === guqinNo);
-      const layers = lacquerStore.layers.filter((l) => l.guqinNo === guqinNo);
+      const chamber = chamberStore.scopedChambers.find((c) => c.guqinNo === guqinNo);
+      const layers = lacquerStore.scopedLayers.filter((l) => l.guqinNo === guqinNo);
       const total = cumulativeThickness(layers);
-      const stringing = stringingStore.stringings.find((s) => s.guqinNo === guqinNo);
+      const stringing = stringingStore.scopedStringings.find((s) => s.guqinNo === guqinNo);
       const species = panel?.species ?? base?.species ?? '';
 
       const stages: StageItem[] = [

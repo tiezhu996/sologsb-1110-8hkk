@@ -9,17 +9,26 @@ import { useBoardStore } from './stores/boardStore';
 import { useChamberStore } from './stores/chamberStore';
 import { useLacquerStore } from './stores/lacquerStore';
 import { useStringingStore } from './stores/stringingStore';
+import { useRevisionStore } from './stores/revisionStore';
+import RevisionBar from './components/common/RevisionBar.vue';
 
 const route = useRoute();
 const boardStore = useBoardStore();
 const chamberStore = useChamberStore();
 const lacquerStore = useLacquerStore();
 const stringingStore = useStringingStore();
+const revisionStore = useRevisionStore();
 const ready = ref(false);
 
 onMounted(async () => {
   try {
-    await seedIfEmpty();
+    // 先自洽修订所有权（升级库已有初版 R001；异常半套库会就地修复），
+    // 再播种全新库、最后装载四类记录；任一步失败都会留下错误信息而非半套界面。
+    await revisionStore.bootstrap();
+    const seededRevisionId = await seedIfEmpty();
+    if (seededRevisionId) {
+      await revisionStore.hydrate();
+    }
     await Promise.all([boardStore.hydrate(), chamberStore.hydrate(), lacquerStore.hydrate(), stringingStore.hydrate()]);
   } catch (error) {
     ElMessage.error(`本地数据装载失败：${(error as Error).message}`);
@@ -30,8 +39,9 @@ onMounted(async () => {
 
 async function handleExport() {
   const json = await exportBackupJson();
-  downloadText(`gbguqin-backup-${new Date().toISOString().slice(0, 10)}.json`, json);
-  ElMessage.success('已导出 IndexedDB 全量 JSON 备份');
+  const label = revisionStore.viewing?.label ?? 'all';
+  downloadText(`gbguqin-backup-${label}-${new Date().toISOString().slice(0, 10)}.json`, json);
+  ElMessage.success(`已导出当前修订 ${label} 在内的全量 JSON 备份`);
 }
 </script>
 
@@ -55,10 +65,13 @@ async function handleExport() {
         <span class="header-title">{{ (route.meta?.title as string) ?? '古琴斫制工序记录台' }}</span>
         <el-button :icon="Download" @click="handleExport">导出备份</el-button>
       </el-header>
+      <RevisionBar />
       <el-main v-loading="!ready" element-loading-text="正在装载本地工序档案…" class="app-main">
         <router-view />
       </el-main>
-      <el-footer class="app-footer">数据保存在浏览器 IndexedDB（gbguqin-db），不依赖后端服务</el-footer>
+      <el-footer class="app-footer">
+        数据保存在浏览器 IndexedDB（gbguqin-db）；工作台可继续施工，封存修订只读，历史修订可随时查看
+      </el-footer>
     </el-container>
   </el-container>
 </template>
@@ -91,6 +104,7 @@ async function handleExport() {
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid #ece0cf;
+  height: 56px;
 }
 .header-title {
   font-weight: 600;
