@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { Download } from '@element-plus/icons-vue';
@@ -9,17 +9,32 @@ import { useBoardStore } from './stores/boardStore';
 import { useChamberStore } from './stores/chamberStore';
 import { useLacquerStore } from './stores/lacquerStore';
 import { useStringingStore } from './stores/stringingStore';
+import { useRevisionStore } from './stores/revisionStore';
+import { revLabel } from './types/revision';
 
 const route = useRoute();
 const boardStore = useBoardStore();
 const chamberStore = useChamberStore();
 const lacquerStore = useLacquerStore();
 const stringingStore = useStringingStore();
+const revisionStore = useRevisionStore();
 const ready = ref(false);
+
+/** 顶栏备份提示用：每张琴当前开放修订标签 */
+const currentRevisionText = computed(() => {
+  const open = revisionStore.revisions.filter((r) => r.status === 'open');
+  if (!open.length) return '当前无开放修订';
+  return `当前修订：${open
+    .slice(0, 3)
+    .map((r) => `${r.guqinNo} ${revLabel(r.revNo)}`)
+    .join('、')}${open.length > 3 ? ` 等 ${open.length} 张琴` : ''}`;
+});
 
 onMounted(async () => {
   try {
     await seedIfEmpty();
+    // 修订档案是四类工作台记录的归属依据，先装载
+    await revisionStore.hydrate();
     await Promise.all([boardStore.hydrate(), chamberStore.hydrate(), lacquerStore.hydrate(), stringingStore.hydrate()]);
   } catch (error) {
     ElMessage.error(`本地数据装载失败：${(error as Error).message}`);
@@ -31,7 +46,9 @@ onMounted(async () => {
 async function handleExport() {
   const json = await exportBackupJson();
   downloadText(`gbguqin-backup-${new Date().toISOString().slice(0, 10)}.json`, json);
-  ElMessage.success('已导出 IndexedDB 全量 JSON 备份');
+  const openCount = revisionStore.revisions.filter((r) => r.status === 'open').length;
+  const sealedCount = revisionStore.sealedCount;
+  ElMessage.success(`已导出全量备份（${openCount} 个当前修订、${sealedCount} 个封存修订，均标明当前修订）`);
 }
 </script>
 
@@ -48,17 +65,25 @@ async function handleExport() {
         <el-menu-item index="/chambers">槽腹尺寸</el-menu-item>
         <el-menu-item index="/lacquer">灰胎髹漆</el-menu-item>
         <el-menu-item index="/stringing">上弦评价</el-menu-item>
+        <el-menu-item index="/revisions">修订档案</el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>
       <el-header class="app-header">
-        <span class="header-title">{{ (route.meta?.title as string) ?? '古琴斫制工序记录台' }}</span>
-        <el-button :icon="Download" @click="handleExport">导出备份</el-button>
+        <div class="header-left">
+          <span class="header-title">{{ (route.meta?.title as string) ?? '古琴斫制工序记录台' }}</span>
+          <el-tooltip :content="currentRevisionText" placement="bottom">
+            <el-tag size="small" type="warning" effect="plain" class="rev-tag">工作台 · 当前修订</el-tag>
+          </el-tooltip>
+        </div>
+        <el-tooltip content="备份包含封存修订档案与每张琴当前修订标记" placement="bottom">
+          <el-button :icon="Download" @click="handleExport">导出备份</el-button>
+        </el-tooltip>
       </el-header>
       <el-main v-loading="!ready" element-loading-text="正在装载本地工序档案…" class="app-main">
         <router-view />
       </el-main>
-      <el-footer class="app-footer">数据保存在浏览器 IndexedDB（gbguqin-db），不依赖后端服务</el-footer>
+      <el-footer class="app-footer">数据保存在浏览器 IndexedDB（gbguqin-db）：工作台 / 封存修订两套所有权，不依赖后端服务</el-footer>
     </el-container>
   </el-container>
 </template>
@@ -92,9 +117,17 @@ async function handleExport() {
   justify-content: space-between;
   border-bottom: 1px solid #ece0cf;
 }
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 .header-title {
   font-weight: 600;
   color: #4a3728;
+}
+.rev-tag {
+  cursor: default;
 }
 .app-main {
   background: #f7f3ed;

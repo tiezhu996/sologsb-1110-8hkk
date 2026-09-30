@@ -1,8 +1,9 @@
 import { defineStore } from 'pinia';
-import { db } from '../utils/db';
+import { db, type OwnedLacquerLayer } from '../utils/db';
 import { uid } from '../utils/id';
 import { toPlain } from '../utils/plain';
 import { cumulativeThickness, nextSeq, sortLayers } from '../utils/layer';
+import { useRevisionStore } from './revisionStore';
 import type { LacquerLayer } from '../types/lacquer-layer';
 
 export interface LacquerInput {
@@ -18,7 +19,7 @@ export interface LacquerInput {
 }
 
 interface LacquerState {
-  layers: LacquerLayer[];
+  layers: OwnedLacquerLayer[];
   hydrated: boolean;
 }
 
@@ -49,12 +50,15 @@ export const useLacquerStore = defineStore('lacquer', {
       this.hydrated = true;
     },
 
-    /** 追加一遍：遍次自动 +1，并重算该琴累计厚度 */
-    async appendLayer(input: LacquerInput): Promise<LacquerLayer> {
-      const siblings = this.layers.filter((l) => l.guqinNo === input.guqinNo);
-      const layer: LacquerLayer = {
+    /** 追加一遍：遍次自动 +1，并重算该琴累计厚度（记入当前开放修订） */
+    async appendLayer(input: LacquerInput): Promise<OwnedLacquerLayer> {
+      const guqinNo = input.guqinNo.trim();
+      const revision = await useRevisionStore().ensureOpen(guqinNo);
+      const siblings = this.layers.filter((l) => l.guqinNo === guqinNo);
+      const layer: OwnedLacquerLayer = {
         id: uid('layer'),
-        guqinNo: input.guqinNo.trim(),
+        revisionId: revision.id,
+        guqinNo,
         seq: nextSeq(siblings),
         mixRatio: input.mixRatio,
         curingTemp: Number(input.curingTemp) || 0,
@@ -82,7 +86,7 @@ export const useLacquerStore = defineStore('lacquer', {
     async updateLayer(id: string, patch: Partial<LacquerInput>) {
       const current = this.layers.find((l) => l.id === id);
       if (!current) return;
-      const next: LacquerLayer = { ...current, ...patch };
+      const next: OwnedLacquerLayer = { ...current, ...patch };
       const siblings = this.layers.filter((l) => l.guqinNo === next.guqinNo).map((l) => (l.id === id ? next : l));
       const withTotals = siblings.map((item) => ({ ...item, totalThickness: cumulativeThickness(siblings, item.seq) }));
       for (const item of withTotals) {

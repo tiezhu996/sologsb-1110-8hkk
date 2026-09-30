@@ -3,7 +3,9 @@ import { useBoardStore } from '../stores/boardStore';
 import { useChamberStore } from '../stores/chamberStore';
 import { useLacquerStore } from '../stores/lacquerStore';
 import { useStringingStore } from '../stores/stringingStore';
+import { useRevisionStore } from '../stores/revisionStore';
 import { cumulativeThickness } from '../utils/layer';
+import { revLabel } from '../types/revision';
 
 export type StageKey = 'select' | 'carve' | 'lacquer' | 'string';
 
@@ -23,6 +25,12 @@ export interface StageProgress {
   /** 缺失项 */
   missing: string[];
   cumulativeMm: number;
+  /** 工作台当前开放修订号 */
+  revNo: number | null;
+  /** 当前修订标签（初版 / 第 N 版），无开放修订时为「—」 */
+  revisionLabel: string;
+  /** 已封存修订数（历史修订仍可查看） */
+  sealedCount: number;
 }
 
 export const STAGE_LABELS: Record<StageKey, string> = {
@@ -44,6 +52,7 @@ export function useStageProgress() {
   const chamberStore = useChamberStore();
   const lacquerStore = useLacquerStore();
   const stringingStore = useStringingStore();
+  const revisionStore = useRevisionStore();
 
   const guqinNos = computed(() => {
     const set = new Set<string>();
@@ -65,6 +74,9 @@ export function useStageProgress() {
       const stringing = stringingStore.stringings.find((s) => s.guqinNo === guqinNo);
       const species = panel?.species ?? base?.species ?? '';
 
+      const openRev = revisionStore.openByGuqin(guqinNo);
+      const sealedCount = revisionStore.revisions.filter((r) => r.guqinNo === guqinNo && r.status === 'sealed').length;
+
       const stages: StageItem[] = [
         {
           key: 'select',
@@ -82,7 +94,7 @@ export function useStageProgress() {
           key: 'lacquer',
           label: STAGE_LABELS.lacquer,
           done: total >= TARGET_MM,
-          detail: layers.length ? `${layers.length} 遍，累计 ${total.toFixed(2)}mm / 目标 ${TARGET_MM}mm` : '尚未髹漆',
+          detail: layers.length ? `${layers.length} 遍，累计 ${total.toFixed(2)}mm / 目标 ${TARGET_MM}mm（${openRev ? revLabel(openRev.revNo) : '—'}）` : '尚未髹漆',
         },
         {
           key: 'string',
@@ -100,6 +112,9 @@ export function useStageProgress() {
         ratio: Math.round((doneCount / stages.length) * 100),
         missing: stages.filter((s) => !s.done).map((s) => s.label),
         cumulativeMm: Number(total.toFixed(2)),
+        revNo: openRev?.revNo ?? null,
+        revisionLabel: openRev ? revLabel(openRev.revNo) : '—',
+        sealedCount,
       };
     }),
   );

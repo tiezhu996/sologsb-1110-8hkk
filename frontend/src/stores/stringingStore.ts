@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia';
-import { db } from '../utils/db';
+import { db, type OwnedStringing } from '../utils/db';
 import { uid } from '../utils/id';
 import { toPlain } from '../utils/plain';
+import { useRevisionStore } from './revisionStore';
 import type { StringDefect, StringType, Stringing, ToneVersion } from '../types/stringing';
 
 export interface StringingInput {
@@ -21,7 +22,7 @@ export interface StringingInput {
 }
 
 interface StringingState {
-  stringings: Stringing[];
+  stringings: OwnedStringing[];
   hydrated: boolean;
 }
 
@@ -57,9 +58,11 @@ export const useStringingStore = defineStore('stringing', {
       this.hydrated = true;
     },
 
-    async addStringing(input: StringingInput): Promise<Stringing> {
-      const stringing: Stringing = {
+    async addStringing(input: StringingInput): Promise<OwnedStringing> {
+      const revision = await useRevisionStore().ensureOpen(input.guqinNo);
+      const stringing: OwnedStringing = {
         id: uid('stringing'),
+        revisionId: revision.id,
         guqinNo: input.guqinNo.trim(),
         stringType: input.stringType,
         nut: input.nut.trim(),
@@ -101,7 +104,7 @@ export const useStringingStore = defineStore('stringing', {
         versions.unshift(version);
       }
 
-      const next: Stringing = {
+      const next: OwnedStringing = {
         ...current,
         guqinNo: patch.guqinNo?.trim() ?? current.guqinNo,
         stringType: patch.stringType ?? current.stringType,

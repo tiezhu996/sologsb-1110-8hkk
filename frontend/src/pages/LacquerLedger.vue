@@ -6,11 +6,14 @@ import LayerStack from '../components/common/LayerStack.vue';
 import EmptyPanel from '../components/common/EmptyPanel.vue';
 import { useLacquerStore } from '../stores/lacquerStore';
 import { useBoardStore } from '../stores/boardStore';
+import { useRevisionStore } from '../stores/revisionStore';
 import { averageThickness, curingInRange, formatDate, layersToTarget, TARGET_TOTAL_MM } from '../utils/layer';
+import { revLabel } from '../types/revision';
 import { MIX_RATIOS, type LacquerLayer } from '../types/lacquer-layer';
 
 const lacquerStore = useLacquerStore();
 const boardStore = useBoardStore();
+const revisionStore = useRevisionStore();
 
 const guqinOptions = computed(() => Array.from(new Set([...boardStore.guqinNos, ...lacquerStore.guqinNos])).sort());
 const selectedGuqin = ref(guqinOptions.value[0] ?? '');
@@ -23,6 +26,10 @@ watch(guqinOptions, (list) => {
 const layers = computed(() => (selectedGuqin.value ? lacquerStore.layersOf(selectedGuqin.value) : []));
 const total = computed(() => (selectedGuqin.value ? lacquerStore.totalOf(selectedGuqin.value) : 0));
 const abnormal = computed(() => layers.value.filter((layer) => !curingInRange(layer.curingTemp, layer.curingHumidity)).length);
+const currentRev = computed(() => (selectedGuqin.value ? revisionStore.openByGuqin(selectedGuqin.value) : undefined));
+const sealedCount = computed(() =>
+  selectedGuqin.value ? revisionStore.revisions.filter((r) => r.guqinNo === selectedGuqin.value && r.status === 'sealed').length : 0,
+);
 
 const dialogVisible = ref(false);
 const editingId = ref('');
@@ -135,6 +142,10 @@ async function remove(layer: LacquerLayer) {
         <el-option v-for="no in guqinOptions" :key="no" :label="no" :value="no" />
       </el-select>
       <el-tag type="warning" effect="plain">髹漆目标累计 {{ TARGET_TOTAL_MM }}mm</el-tag>
+      <el-tag v-if="currentRev" type="warning" effect="dark">
+        当前修订 {{ revLabel(currentRev.revNo) }}（累计 {{ total.toFixed(2) }}mm 取此修订）
+      </el-tag>
+      <el-tag v-if="sealedCount" type="success" effect="plain">已封存 {{ sealedCount }} 个历史修订（只读）</el-tag>
     </div>
 
     <el-row :gutter="12" class="stat-row">
@@ -142,7 +153,7 @@ async function remove(layer: LacquerLayer) {
         <StatBadge label="该琴髹漆遍次" :value="layers.length" unit="遍" />
       </el-col>
       <el-col :xs="12" :md="6">
-        <StatBadge label="累计厚度" :value="total.toFixed(2)" unit="mm" :status="total >= TARGET_TOTAL_MM ? 'success' : 'warning'" />
+        <StatBadge :label="`累计厚度（${currentRev ? revLabel(currentRev.revNo) : '—'}）`" :value="total.toFixed(2)" unit="mm" :status="total >= TARGET_TOTAL_MM ? 'success' : 'warning'" />
       </el-col>
       <el-col :xs="12" :md="6">
         <StatBadge label="每遍平均厚度" :value="averageThickness(layers)" unit="mm" />

@@ -3,6 +3,7 @@ import type { WoodBoard } from '../types/wood-board';
 import type { SoundChamber } from '../types/sound-chamber';
 import type { LacquerLayer } from '../types/lacquer-layer';
 import type { Stringing } from '../types/stringing';
+import type { Revision } from '../types/revision';
 import { cumulativeThickness } from './layer';
 
 const DAY = 86_400_000;
@@ -130,25 +131,84 @@ export const SEED_STRINGINGS: Stringing[] = [
   },
 ];
 
-/** 首次打开（表内无数据）时写入示例数据；已有数据则不动 */
+/**
+ * 首次打开（表内无数据）时写入示例数据；已有数据则不动。
+ *
+ * v3 所有权：每张示例琴自带一个「初版」开放修订，四类行挂到对应 revisionId；
+ * 全部写入跑在同一事务里，半套失败一起回滚。
+ */
 export async function seedIfEmpty(): Promise<void> {
   const flag = await db.meta.get('seeded');
   if (flag) {
     return;
   }
-  const [boardCount, chamberCount, lacquerCount, stringingCount] = await Promise.all([
+  const [boardCount, chamberCount, lacquerCount, stringingCount, revisionCount] = await Promise.all([
     db.boards.count(),
     db.chambers.count(),
     db.lacquers.count(),
     db.stringings.count(),
+    db.revisions.count(),
   ]);
-  const layers = withCumulative(buildSeedLayers());
-
-  await db.transaction('rw', db.boards, db.chambers, db.lacquers, db.stringings, db.meta, async () => {
-    if (boardCount === 0) await db.boards.bulkPut(SEED_BOARDS);
-    if (chamberCount === 0) await db.chambers.bulkPut(SEED_CHAMBERS);
-    if (lacquerCount === 0) await db.lacquers.bulkPut(layers);
-    if (stringingCount === 0) await db.stringings.bulkPut(SEED_STRINGINGS);
+  if (boardCount || chamberCount || lacquerCount || stringingCount || revisionCount) {
+    // 非空库（含刚由 v2 升级出修订档案）只补标记，绝不覆盖
     await db.meta.put({ key: 'seeded', value: new Date().toISOString() });
+    return;
+  }
+
+  const layers = withCumulative(buildSeedLayers());
+  const frozenAt = new Date().toISOString();
+  const guqinNos = Array.from(
+    new Set([
+      ...SEED_BOARDS.map((b) => b.guqinNo),
+      ...SEED_CHAMBERS.map((c) => c.guqinNo),
+      ...layers.map((l) => l.guqinNo),
+      ...SEED_STRINGINGS.map((s) => s.guqinNo),
+    ]),
+  ).sort();
+
+  /** 琴号 → 初版开放修订 id（确定性 id，示例数据可重复构建） */
+  const revByGuqin = new Map<string, string>();
+  const seedRevisions: Revision[] = guqinNos.map((guqinNo) => {
+    const id = `rev-seed-${guqinNo}`;
+    revByGuqin.set(guqinNo, id);
+    return {
+      id,
+      guqinNo,
+      revNo: 1,
+      status: 'open' as const,
+      frozenAt,
+      note: '示例数据的初版修订（开放中，可继续施工或封存）',
+      boards: [],
+      chambers: [],
+      lacquers: [],
+      stringings: [],
+      counts: {
+        boards: SEED_BOARDS.filter((b) => b.guqinNo === guqinNo).length,
+        chambers: SEED_CHAMBERS.filter((c) => c.guqinNo === guqinNo).length,
+        lacquers: layers.filter((l) => l.guqinNo === guqinNo).length,
+        stringings: SEED_STRINGINGS.filter((s) => s.guqinNo === guqinNo).length,
+      },
+    };
+  });
+
+  const own = <T extends { guqinNo: string }>(row: T) => ({
+    ...row,
+    revisionId: revByGuqin.get(row.guqinNo)!,
+  });
+  const seedBoards = SEED_BOARDS.map(own);
+  const seedChambers = SEED_CHAMBERS.map(own);
+  const seedLayers = layers.map(own);
+  const seedStringings = SEED_STRINGINGS.map(own);
+
+  await db.transaction(
+    'rw',
+    [db.boards, db.chambers, db.lacquers, db.stringings, db.revisions, db.meta],
+    async () => {
+    await db.revisions.bulkPut(seedRevisions);
+    await db.boards.bulkPut(seedBoards);
+    await db.chambers.bulkPut(seedChambers);
+    await db.lacquers.bulkPut(seedLayers);
+    await db.stringings.bulkPut(seedStringings);
+    await db.meta.put({ key: 'seeded', value: frozenAt });
   });
 }

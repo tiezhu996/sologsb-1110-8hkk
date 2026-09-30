@@ -1,8 +1,9 @@
 import { defineStore } from 'pinia';
-import { db } from '../utils/db';
+import { db, type OwnedWoodBoard } from '../utils/db';
 import { uid } from '../utils/id';
 import { toPlain } from '../utils/plain';
 import { pairBoards, boardUsable } from '../utils/wood';
+import { useRevisionStore } from './revisionStore';
 import type { BoardPart, BoardPair, WoodBoard, WoodDefect, WoodGrain, WoodSpecies } from '../types/wood-board';
 
 export interface BoardInput {
@@ -19,11 +20,11 @@ export interface BoardInput {
 }
 
 interface BoardState {
-  boards: WoodBoard[];
+  boards: OwnedWoodBoard[];
   hydrated: boolean;
 }
 
-/** 板材与面板/底板配对 */
+/** 板材与面板/底板配对（仅含当前各琴开放修订的工作台数据） */
 export const useBoardStore = defineStore('board', {
   state: (): BoardState => ({ boards: [], hydrated: false }),
 
@@ -50,9 +51,12 @@ export const useBoardStore = defineStore('board', {
       this.hydrated = true;
     },
 
-    async addBoard(input: BoardInput): Promise<WoodBoard> {
-      const board: WoodBoard = {
+    async addBoard(input: BoardInput): Promise<OwnedWoodBoard> {
+      const revisionStore = useRevisionStore();
+      const revision = await revisionStore.ensureOpen(input.guqinNo);
+      const board: OwnedWoodBoard = {
         id: uid('board'),
+        revisionId: revision.id,
         boardNo: input.boardNo.trim(),
         guqinNo: input.guqinNo.trim(),
         part: input.part,
@@ -72,7 +76,12 @@ export const useBoardStore = defineStore('board', {
     async updateBoard(id: string, patch: Partial<BoardInput>) {
       const current = this.boards.find((b) => b.id === id);
       if (!current) return;
-      const next: WoodBoard = { ...current, ...patch };
+      // 改琴号即归到目标琴号的开放修订
+      let revisionId = current.revisionId;
+      if (patch.guqinNo && patch.guqinNo.trim() !== current.guqinNo) {
+        revisionId = (await useRevisionStore().ensureOpen(patch.guqinNo)).id;
+      }
+      const next: OwnedWoodBoard = { ...current, ...patch, revisionId };
       await db.boards.put(toPlain(next));
       this.boards = this.boards.map((b) => (b.id === id ? next : b));
     },
@@ -82,13 +91,14 @@ export const useBoardStore = defineStore('board', {
       this.boards = this.boards.filter((b) => b.id !== id);
     },
 
-    /** 配对绑定：把某块板材与同琴号的另一部位板材绑定 */
+    /** 配对绑定：把底板并入面板所在琴号的开放修订 */
     async pair(panelId: string, baseId: string) {
       const panel = this.boards.find((b) => b.id === panelId);
       const base = this.boards.find((b) => b.id === baseId);
       if (!panel || !base) return;
       const guqinNo = panel.guqinNo;
-      const updated = [panel, base].map((b) => ({ ...b, guqinNo }));
+      const revision = await useRevisionStore().ensureOpen(guqinNo);
+      const updated = [panel, base].map((b) => ({ ...b, guqinNo, revisionId: revision.id }));
       for (const board of updated) {
         await db.boards.put(toPlain(board));
       }

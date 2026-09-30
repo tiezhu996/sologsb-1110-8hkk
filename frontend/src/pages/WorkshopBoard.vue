@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import StatBadge from '../components/common/StatBadge.vue';
 import ProcessTimeline from '../components/common/ProcessTimeline.vue';
 import FilterBar from '../components/common/FilterBar.vue';
@@ -9,15 +9,18 @@ import { useBoardStore } from '../stores/boardStore';
 import { useChamberStore } from '../stores/chamberStore';
 import { useLacquerStore } from '../stores/lacquerStore';
 import { useStringingStore } from '../stores/stringingStore';
+import { useRevisionStore } from '../stores/revisionStore';
 import { formatDate } from '../utils/layer';
 import { WOOD_SPECIES } from '../types/wood-board';
 import type { TimelineEvent } from '../types/ui';
 
 const route = useRoute();
+const router = useRouter();
 const boardStore = useBoardStore();
 const chamberStore = useChamberStore();
 const lacquerStore = useLacquerStore();
 const stringingStore = useStringingStore();
+const revisionStore = useRevisionStore();
 const { progressList, summary } = useStageProgress();
 
 const stageParam = computed(() => (typeof route.query.stage === 'string' ? route.query.stage : ''));
@@ -43,6 +46,11 @@ const stageBadges = computed(() =>
 );
 
 const pendingString = computed(() => progressList.value.filter((item) => !item.stages.find((s) => s.key === 'string')?.done).length);
+const sealedTotal = computed(() => revisionStore.sealedCount);
+
+function openRevisions() {
+  void router.push('/revisions');
+}
 
 const events = computed<TimelineEvent[]>(() => {
   const list: TimelineEvent[] = [];
@@ -78,8 +86,7 @@ const events = computed<TimelineEvent[]>(() => {
   <div>
     <h2 class="page-title">琴坯进度</h2>
     <p class="page-desc">
-      按选材 / 掏膛 / 灰胎 / 上弦四阶段统计在制琴坯；音色只用文字评语记录，不做音频文件与波形处理。数据保存在浏览器
-      IndexedDB（gbguqin-db）。
+      按选材 / 掏膛 / 灰胎 / 上弦四阶段统计在制琴坯；进度、累计灰胎均取每张琴<span class="hl">当前开放修订</span>的工作台数据，历史封存修订在「修订档案」只读查看。
     </p>
 
     <el-row :gutter="12" class="stat-row">
@@ -95,13 +102,20 @@ const events = computed<TimelineEvent[]>(() => {
       <el-col :xs="12" :md="6">
         <StatBadge label="待上弦" :value="pendingString" unit="张" :status="pendingString ? 'danger' : 'success'" />
       </el-col>
+      <el-col :xs="12" :md="6">
+        <StatBadge label="已封存修订" :value="sealedTotal" unit="个" status="success" />
+      </el-col>
     </el-row>
 
     <el-card shadow="never" class="block">
       <template #header>
         <div class="card-head">
           <span>阶段统计（已完成琴坯数）</span>
-          <span class="card-note">板材 {{ boardStore.boards.length }} 块（可用 {{ boardStore.usableCount }} 块）· 髹漆 {{ lacquerStore.layers.length }} 遍 · 荫房异常 {{ lacquerStore.outOfRangeCount }} 遍</span>
+          <span class="card-note">
+            板材 {{ boardStore.boards.length }} 块（可用 {{ boardStore.usableCount }} 块）· 髹漆 {{ lacquerStore.layers.length }} 遍 ·
+            荫房异常 {{ lacquerStore.outOfRangeCount }} 遍 ·
+            <el-button link type="primary" @click="openRevisions">封存修订 {{ sealedTotal }} 个，查看档案 ›</el-button>
+          </span>
         </div>
       </template>
       <el-row :gutter="12">
@@ -128,8 +142,16 @@ const events = computed<TimelineEvent[]>(() => {
         :total-count="progressList.length"
       />
       <el-table :data="visible" size="small" border>
-        <el-table-column prop="guqinNo" label="琴号" width="110" />
-        <el-table-column prop="species" label="树种" width="90" />
+        <el-table-column prop="guqinNo" label="琴号" width="100" />
+        <el-table-column label="当前修订" width="150">
+          <template #default="scope">
+            <el-tag type="warning" size="small" effect="plain">{{ scope.row.revisionLabel }}</el-tag>
+            <el-tag v-if="scope.row.sealedCount" type="success" size="small" effect="plain" class="sealed-tag">
+              存 {{ scope.row.sealedCount }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="species" label="树种" width="80" />
         <el-table-column label="四阶段" min-width="300">
           <template #default="scope">
             <el-tag
@@ -154,8 +176,11 @@ const events = computed<TimelineEvent[]>(() => {
             <el-tag v-else type="success" size="small">齐备</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="累计灰胎(mm)" width="120">
-          <template #default="scope">{{ scope.row.cumulativeMm.toFixed(2) }}</template>
+        <el-table-column label="累计灰胎(mm)" width="140">
+          <template #default="scope">
+            <span>{{ scope.row.cumulativeMm.toFixed(2) }}</span>
+            <span class="cur-hint">·{{ scope.row.revisionLabel }}</span>
+          </template>
         </el-table-column>
       </el-table>
     </el-card>
@@ -203,5 +228,17 @@ const events = computed<TimelineEvent[]>(() => {
 .missing {
   color: #c62828;
   font-size: 13px;
+}
+.hl {
+  color: #b7791f;
+  font-weight: 600;
+}
+.sealed-tag {
+  margin-left: 4px;
+}
+.cur-hint {
+  font-size: 11px;
+  color: #b7791f;
+  margin-left: 2px;
 }
 </style>

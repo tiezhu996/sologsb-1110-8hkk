@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia';
-import { db } from '../utils/db';
+import { db, type OwnedSoundChamber } from '../utils/db';
 import { uid } from '../utils/id';
 import { toPlain } from '../utils/plain';
+import { useRevisionStore } from './revisionStore';
 import type { PostPos, SoundChamber, ThicknessMark } from '../types/sound-chamber';
 
 export interface ChamberInput {
@@ -18,7 +19,7 @@ export interface ChamberInput {
 }
 
 interface ChamberState {
-  chambers: SoundChamber[];
+  chambers: OwnedSoundChamber[];
   hydrated: boolean;
 }
 
@@ -68,12 +69,16 @@ export const useChamberStore = defineStore('chamber', {
       this.hydrated = true;
     },
 
-    /** 每张琴一份槽腹记录：存在则更新，不存在则新增 */
-    async saveChamber(input: ChamberInput): Promise<SoundChamber> {
-      const existed = this.chambers.find((c) => c.guqinNo === input.guqinNo);
-      const chamber: SoundChamber = {
+    /** 每张琴一份槽腹记录：存在则更新，不存在则新增（归属当前开放修订） */
+    async saveChamber(input: ChamberInput): Promise<OwnedSoundChamber> {
+      const guqinNo = input.guqinNo.trim();
+      const existed = this.chambers.find((c) => c.guqinNo === guqinNo);
+      // 新琴先开（或找到）开放修订，再挂槽腹记录
+      const revisionId = existed?.revisionId ?? (await useRevisionStore().ensureOpen(guqinNo)).id;
+      const chamber: OwnedSoundChamber = {
         id: existed?.id ?? uid('chamber'),
-        guqinNo: input.guqinNo.trim(),
+        revisionId,
+        guqinNo,
         nayinThickness: Number(input.nayinThickness) || 0,
         longchiThickness: Number(input.longchiThickness) || 0,
         fengzhaoThickness: Number(input.fengzhaoThickness) || 0,
